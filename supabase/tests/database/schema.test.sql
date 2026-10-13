@@ -1,9 +1,14 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(13);
+select plan(14);
 
 -- seed may or may not have run; make the allowlist deterministic
 insert into public.allowed_emails (email) values ('a@example.com'), ('b@example.com') on conflict do nothing;
+
+select throws_ok(
+  $$ insert into public.allowed_emails (email) values (' c@example.com ') $$,
+  null, null, 'allowlist rejects emails with surrounding spaces'
+);
 
 select throws_ok(
   $$ insert into auth.users (id, email) values ('00000000-0000-0000-0000-00000000000f', 'stranger@example.com') $$,

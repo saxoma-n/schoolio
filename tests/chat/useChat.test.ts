@@ -196,3 +196,60 @@ test('switching chats mid-stream aborts and keeps the reply out of the new chat'
   await waitFor(() => expect(result.current.messages.map((m) => m.content)).toEqual(['other chat']))
   expect(result.current.streaming).toBe(false)
 })
+
+test('returning to a chat created this session reloads its messages', async () => {
+  fns.streamChat.mockImplementation(reply('ok'))
+  const a1 = saved({ chat_id: 'c1', role: 'user', content: 'in A', model: 'm', status: 'complete', prompt_tokens: null, completion_tokens: null })
+  const b1 = saved({ chat_id: 'c2', role: 'user', content: 'in B', model: 'm', status: 'complete', prompt_tokens: null, completion_tokens: null })
+  const { result, rerender } = renderHook((o) => useChat(o), { initialProps: opts() })
+  await act(() => result.current.send('hi')) // creates c1
+  rerender(opts({ chatId: 'c1' }))
+  db.listMessages.mockImplementation(async (id: string) => (id === 'c1' ? [a1] : [b1]))
+  rerender(opts({ chatId: null }))
+  rerender(opts({ chatId: 'c2' }))
+  await waitFor(() => expect(result.current.messages.map((m) => m.content)).toEqual(['in B']))
+  rerender(opts({ chatId: 'c1' }))
+  await waitFor(() => expect(result.current.messages.map((m) => m.content)).toEqual(['in A']))
+})
+
+test('switching chats right after saving the user message does not stream into the new chat', async () => {
+  fns.streamChat.mockImplementation(reply('ok'))
+  let releaseSave!: () => void
+  db.insertMessage.mockImplementationOnce((m) => new Promise((r) => (releaseSave = () => r(saved(m)))))
+  db.listMessages.mockResolvedValue([])
+  const { result, rerender } = renderHook((o) => useChat(o), { initialProps: opts({ chatId: 'c1' }) })
+  let p!: Promise<void>
+  act(() => {
+    p = result.current.send('hi')
+  })
+  await waitFor(() => expect(releaseSave).toBeTypeOf('function'))
+  rerender(opts({ chatId: 'c2' }))
+  await act(async () => {
+    releaseSave()
+    await p
+  })
+  expect(fns.streamChat).not.toHaveBeenCalled()
+  expect(result.current.messages).toEqual([])
+})
+
+test('a failed delete during regenerate surfaces an error', async () => {
+  const a = saved({ chat_id: 'c1', role: 'assistant', content: 'old', model: 'm', status: 'complete', prompt_tokens: 1, completion_tokens: 1 })
+  db.listMessages.mockResolvedValue([a])
+  db.deleteMessage.mockRejectedValue(new Error('offline'))
+  const { result } = renderHook(() => useChat(opts({ chatId: 'c1' })))
+  await waitFor(() => expect(result.current.messages).toHaveLength(1))
+  await act(() => result.current.regenerate())
+  expect(result.current.error).toBe('offline')
+  expect(result.current.streaming).toBe(false)
+})
+
+test('a failed retrySave surfaces an error', async () => {
+  fns.streamChat.mockImplementation(reply('ok'))
+  db.insertMessage.mockRejectedValueOnce(new Error('offline'))
+  const { result } = renderHook(() => useChat(opts()))
+  await act(() => result.current.send('hi'))
+  db.insertMessage.mockRejectedValueOnce(new Error('still offline'))
+  await act(() => result.current.retrySave(result.current.messages[0].localId))
+  expect(result.current.error).toBe('still offline')
+  expect(result.current.messages[0].saveFailed).toBe(true)
+})

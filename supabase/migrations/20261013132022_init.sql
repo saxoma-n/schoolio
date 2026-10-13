@@ -1,7 +1,7 @@
 -- Schoolio Stage 1 schema: allowlisted signup, per-user chats/messages/profiles under RLS.
 
 create table public.allowed_emails (
-  email text primary key check (email = lower(email))
+  email text primary key check (email = lower(trim(email)))
 );
 
 create table public.profiles (

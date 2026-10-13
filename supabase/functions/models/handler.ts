@@ -1,5 +1,6 @@
 import { corsHeaders, preflight, unavailable } from '../_shared/cors.ts'
 import { allowPaid, baseUrl, type Env } from '../_shared/env.ts'
+import { rejectUnlessUser } from '../_shared/auth.ts'
 
 type UpstreamModel = {
   id: string
@@ -11,6 +12,8 @@ type UpstreamModel = {
 
 export async function handleModels(req: Request, env: Env, fetchFn: typeof fetch = fetch): Promise<Response> {
   if (req.method === 'OPTIONS') return preflight()
+  const denied = await rejectUnlessUser(req, env, fetchFn)
+  if (denied) return denied
   if (!env.OPENROUTER_API_KEY) return unavailable()
   try {
     const res = await fetchFn(`${baseUrl(env)}/models`)

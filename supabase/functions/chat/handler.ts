@@ -1,11 +1,14 @@
 import { corsHeaders, errorResponse, preflight, unavailable } from '../_shared/cors.ts'
 import { allowPaid, baseUrl, type Env } from '../_shared/env.ts'
 import { isFreeModel } from '../_shared/free.ts'
+import { rejectUnlessUser } from '../_shared/auth.ts'
 
 type Body = { model?: unknown; messages?: unknown }
 
 export async function handleChat(req: Request, env: Env, fetchFn: typeof fetch = fetch): Promise<Response> {
   if (req.method === 'OPTIONS') return preflight()
+  const denied = await rejectUnlessUser(req, env, fetchFn)
+  if (denied) return denied
   const key = env.OPENROUTER_API_KEY
   if (!key) return unavailable()
 

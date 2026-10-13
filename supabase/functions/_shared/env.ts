@@ -2,6 +2,9 @@ export type Env = {
   OPENROUTER_API_KEY?: string
   OPENROUTER_BASE_URL?: string
   ALLOW_PAID_MODELS?: string
+  // Injected by Supabase into every Edge Function
+  SUPABASE_URL?: string
+  SUPABASE_ANON_KEY?: string
 }
 
 export const baseUrl = (env: Env) => env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1'

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, test } from 'vitest'
 import { handleModels } from '../../supabase/functions/models/handler.ts'
-import { KEY, expectNoKey, stubFetch } from './stub'
+import { AUTH_ENV, KEY, authed, expectNoKey, stubFetch } from './stub'
 
 const upstream = {
   data: [
@@ -10,7 +10,7 @@ const upstream = {
   ],
 }
 const ok = () => stubFetch({ '/models': () => Response.json(upstream) })
-const get = () => new Request('http://fn/models')
+const get = () => authed('http://fn/models')
 
 test('OPTIONS returns CORS headers', async () => {
   const res = await handleModels(new Request('http://fn/models', { method: 'OPTIONS' }), {}, ok().fn)
@@ -19,7 +19,7 @@ test('OPTIONS returns CORS headers', async () => {
 })
 
 test('maps upstream models to the spec shape', async () => {
-  const res = await handleModels(get(), { OPENROUTER_API_KEY: KEY }, ok().fn)
+  const res = await handleModels(get(), { ...AUTH_ENV, OPENROUTER_API_KEY: KEY }, ok().fn)
   expect(res.status).toBe(200)
   expect(res.headers.get('Cache-Control')).toBe('max-age=3600')
   expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*')
@@ -33,18 +33,23 @@ test('maps upstream models to the spec shape', async () => {
 })
 
 test('allowPaid mirrors ALLOW_PAID_MODELS', async () => {
-  const res = await handleModels(get(), { OPENROUTER_API_KEY: KEY, ALLOW_PAID_MODELS: 'true' }, ok().fn)
+  const res = await handleModels(get(), { ...AUTH_ENV, OPENROUTER_API_KEY: KEY, ALLOW_PAID_MODELS: 'true' }, ok().fn)
   expect((await res.json()).allowPaid).toBe(true)
 })
 
 test('no key gives 503 unavailable', async () => {
-  const res = await handleModels(get(), {}, ok().fn)
+  const res = await handleModels(get(), AUTH_ENV, ok().fn)
   expect(res.status).toBe(503)
   expect(await res.json()).toEqual({ error: { code: 'unavailable', message: 'Model service unavailable.' } })
 })
 
 test('upstream unreachable gives 503 and never leaks the key', async () => {
-  const res = await handleModels(get(), { OPENROUTER_API_KEY: KEY }, stubFetch({}).fn)
+  const res = await handleModels(get(), { ...AUTH_ENV, OPENROUTER_API_KEY: KEY }, stubFetch({}).fn)
   expect(res.status).toBe(503)
   await expectNoKey(res)
+})
+
+test('request without a login is rejected with 401', async () => {
+  const res = await handleModels(new Request('http://fn/models'), { ...AUTH_ENV, OPENROUTER_API_KEY: KEY }, ok().fn)
+  expect(res.status).toBe(401)
 })

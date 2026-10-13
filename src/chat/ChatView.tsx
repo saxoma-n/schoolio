@@ -23,7 +23,10 @@ export function ChatView({ chatId, chatModel, profile, onChatCreated, onReplyCom
   const firstFree = data?.models.find(isFreeModel)?.id ?? ''
   const [picked, setPicked] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
-  useEffect(() => setPicked(null), [chatId])
+  useEffect(() => {
+    setPicked(null)
+    setEditing(null) // a pending edit belongs to the chat it was started in
+  }, [chatId])
 
   const model = picked ?? chatModel ?? profile.default_model ?? firstFree
   const contextLength = data?.models.find((m) => m.id === model)?.context_length ?? FALLBACK_CONTEXT

@@ -1,17 +1,17 @@
 // @vitest-environment node
 import { expect, test } from 'vitest'
 import { handleChat } from '../../supabase/functions/chat/handler.ts'
-import { KEY, expectNoKey, stubFetch } from './stub'
+import { AUTH_ENV, KEY, authed, expectNoKey, stubFetch } from './stub'
 
 const BASE = 'http://mock/api/v1'
-const env = { OPENROUTER_API_KEY: KEY, OPENROUTER_BASE_URL: BASE }
+const env = { ...AUTH_ENV, OPENROUTER_API_KEY: KEY, OPENROUTER_BASE_URL: BASE }
 const SSE = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'
 const models = { data: [{ id: 'a/b', name: 'AB', context_length: 1, pricing: { prompt: '0.1', completion: '0' } }] }
 const routes = {
   '/chat/completions': () => new Response(SSE, { headers: { 'Content-Type': 'text/event-stream' } }),
   '/models': () => Response.json(models),
 }
-const post = (body: unknown) => new Request('http://fn/chat', { method: 'POST', body: JSON.stringify(body) })
+const post = (body: unknown) => authed('http://fn/chat', { method: 'POST', body: JSON.stringify(body) })
 const msgs = [{ role: 'user', content: 'hi' }]
 
 test('OPTIONS returns CORS headers', async () => {
@@ -21,7 +21,7 @@ test('OPTIONS returns CORS headers', async () => {
 })
 
 test('no key gives 503 Model service unavailable.', async () => {
-  const res = await handleChat(post({ model: 'a/b:free', messages: msgs }), {}, stubFetch(routes).fn)
+  const res = await handleChat(post({ model: 'a/b:free', messages: msgs }), AUTH_ENV, stubFetch(routes).fn)
   expect(res.status).toBe(503)
   expect(await res.json()).toEqual({ error: { code: 'unavailable', message: 'Model service unavailable.' } })
 })
@@ -35,7 +35,7 @@ test('missing model or messages gives 400 bad_request', async () => {
 })
 
 test('invalid JSON gives 400 bad_request', async () => {
-  const res = await handleChat(new Request('http://fn/chat', { method: 'POST', body: '{' }), env, stubFetch(routes).fn)
+  const res = await handleChat(authed('http://fn/chat', { method: 'POST', body: '{' }), env, stubFetch(routes).fn)
   expect(res.status).toBe(400)
 })
 
@@ -82,4 +82,22 @@ test('upstream unreachable gives 503', async () => {
   const res = await handleChat(post({ model: 'a/b:free', messages: msgs }), env, stubFetch({}).fn)
   expect(res.status).toBe(503)
   await expectNoKey(res)
+})
+
+test('request without a token is rejected with 401 before reaching OpenRouter', async () => {
+  const s = stubFetch(routes)
+  const res = await handleChat(new Request('http://fn/chat', { method: 'POST', body: '{}' }), env, s.fn)
+  expect(res.status).toBe(401)
+  expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*')
+  expect(s.calls.some((c) => c.url.includes('/chat/completions'))).toBe(false)
+})
+
+test('the public anon key is not accepted as a login', async () => {
+  const s = stubFetch(routes)
+  const req = new Request('http://fn/chat', { method: 'POST', headers: { Authorization: 'Bearer anon-key' }, body: JSON.stringify({ model: 'a/b:free', messages: msgs }) })
+  const res = await handleChat(req, env, s.fn)
+  expect(res.status).toBe(401)
+  expect(s.calls.some((c) => c.url.includes('/chat/completions'))).toBe(false)
+  const authCall = s.calls.find((c) => c.url === 'http://sb/auth/v1/user')!
+  expect(new Headers(authCall.init!.headers).get('apikey')).toBe('anon-key')
 })

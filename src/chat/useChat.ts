@@ -47,7 +47,10 @@ export function useChat(opts: Opts) {
     chatIdRef.current = opts.chatId
     setError(null)
     setTrimmed(false)
-    if (opts.chatId && opts.chatId === createdIdRef.current) return // we just created it; state is already current
+    if (opts.chatId && opts.chatId === createdIdRef.current) {
+      createdIdRef.current = null // only the first arrival skips loading; later visits reload
+      return // we just created it; state is already current
+    }
     abortRef.current?.abort() // leaving a chat mid-reply saves the partial reply to that chat
     setMessages([])
     if (!opts.chatId) return
@@ -140,6 +143,8 @@ export function useChat(opts: Opts) {
     setError(null)
     try {
       await work()
+    } catch (e) {
+      setError(errorMessage(e))
     } finally {
       busyRef.current = false
       setStreaming(false)
@@ -164,6 +169,7 @@ export function useChat(opts: Opts) {
     }
     const isFirst = messagesRef.current.length === 0
     const user = await save({ chat_id: chatId, role: 'user', content: text, model: optsRef.current.model, status: 'complete', prompt_tokens: null, completion_tokens: null })
+    if (chatIdRef.current !== chatId) return // user switched chats while saving; the message is stored, don't stream into the new view
     setMessages([...messagesRef.current, user])
 
     const failure = await respond(chatId, messagesRef.current)
@@ -215,8 +221,12 @@ export function useChat(opts: Opts) {
     const m = messagesRef.current.find((x) => x.localId === localId)
     if (!m?.saveFailed) return
     const { id: _id, created_at: _c, localId: _l, saveFailed: _s, ...fields } = m
-    const row = await db.insertMessage(fields)
-    setMessages(messagesRef.current.map((x) => (x.localId === localId ? { ...row, localId } : x)))
+    try {
+      const row = await db.insertMessage(fields)
+      setMessages(messagesRef.current.map((x) => (x.localId === localId ? { ...row, localId } : x)))
+    } catch (e) {
+      setError(errorMessage(e))
+    }
   }, [])
 
   return { messages, streamingText, streaming, error, trimmed, restoredDraft, send, stop, regenerate, editLast, retrySave }

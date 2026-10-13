@@ -79,3 +79,17 @@ test('edit puts the last user message in the composer and resends via editLast',
   expect(chat.state.editLast).toHaveBeenCalledWith('new')
   expect(chat.state.send).not.toHaveBeenCalled()
 })
+
+test('a pending edit is dropped when switching chats', async () => {
+  const user = { id: '1', localId: '1', chat_id: 'c1', role: 'user', content: 'old', model: 'a:free', status: 'complete', prompt_tokens: null, completion_tokens: null, created_at: '' }
+  chat.state = { ...base(), messages: [user] }
+  const { rerender } = view({ chatId: 'c1', chatModel: 'a:free' })
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  chat.state = { ...base(), messages: [] }
+  rerender(<ChatView chatId="c2" chatModel="a:free" profile={profile} onChatCreated={vi.fn()} />)
+  const box = screen.getByLabelText('Message')
+  await userEvent.clear(box)
+  await userEvent.type(box, 'fresh{Enter}')
+  expect(chat.state.send).toHaveBeenCalledWith('fresh')
+  expect(chat.state.editLast).not.toHaveBeenCalled()
+})
