@@ -30,3 +30,36 @@ jobs:
       - run: npm ci
       - run: npx supabase start
       - run: npm run test:db
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx supabase start
+      - name: Serve edge functions against the mock OpenRouter
+        run: |
+          nohup npx supabase functions serve --env-file supabase/functions/.env.test > functions.log 2>&1 &
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS http://127.0.0.1:54321/functions/v1/models || true)
+            [ "$code" = "200" ] && exit 0
+            sleep 2
+          done
+          cat functions.log; exit 1
+      - name: Run Playwright
+        run: |
+          eval "$(npx supabase status -o env)"
+          export VITE_SUPABASE_URL="$API_URL" VITE_SUPABASE_ANON_KEY="$ANON_KEY"
+          npm run e2e
+      - if: failure()
+        run: cat functions.log || true
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: test-results
