@@ -48,6 +48,7 @@ export function useChat(opts: Opts) {
     setError(null)
     setTrimmed(false)
     if (opts.chatId && opts.chatId === createdIdRef.current) return // we just created it; state is already current
+    abortRef.current?.abort() // leaving a chat mid-reply saves the partial reply to that chat
     setMessages([])
     if (!opts.chatId) return
     let live = true
@@ -112,9 +113,9 @@ export function useChat(opts: Opts) {
     if (text) {
       const status = failure || aborted ? 'incomplete' : 'complete'
       const reply = await save({ chat_id: chatId, role: 'assistant', content: text, model, status, ...usage })
-      setMessages([...messagesRef.current, reply])
+      if (chatIdRef.current === chatId) setMessages([...messagesRef.current, reply])
     }
-    if (failure) setError(errorMessage(failure))
+    if (failure && chatIdRef.current === chatId) setError(errorMessage(failure))
     return failure ?? (text ? null : aborted ? 'aborted' : null)
   }
 

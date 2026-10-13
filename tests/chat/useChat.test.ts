@@ -176,3 +176,23 @@ test('editLast deletes the last user message and its reply, then resends', async
   expect(db.deleteMessage).toHaveBeenCalledWith(a.id)
   expect(result.current.messages.map((m) => m.content)).toEqual(['hello', 'new'])
 })
+
+test('switching chats mid-stream aborts and keeps the reply out of the new chat', async () => {
+  fns.streamChat.mockImplementation(async function* (_m: string, _x: unknown, signal: AbortSignal) {
+    yield { type: 'delta', text: 'part' }
+    await new Promise((_, rej) => signal.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError'))))
+  })
+  const other = saved({ chat_id: 'c2', role: 'user', content: 'other chat', model: 'm', status: 'complete', prompt_tokens: null, completion_tokens: null })
+  db.listMessages.mockImplementation(async (id: string) => (id === 'c2' ? [other] : []))
+  const { result, rerender } = renderHook((o) => useChat(o), { initialProps: opts({ chatId: 'c1' }) })
+  let p!: Promise<void>
+  act(() => {
+    p = result.current.send('hi')
+  })
+  await waitFor(() => expect(result.current.streamingText).toBe('part'))
+  rerender(opts({ chatId: 'c2' }))
+  await act(() => p)
+  expect(db.insertMessage).toHaveBeenLastCalledWith(expect.objectContaining({ chat_id: 'c1', content: 'part', status: 'incomplete' }))
+  await waitFor(() => expect(result.current.messages.map((m) => m.content)).toEqual(['other chat']))
+  expect(result.current.streaming).toBe(false)
+})
